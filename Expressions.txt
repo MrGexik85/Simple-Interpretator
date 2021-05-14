@@ -1,6 +1,6 @@
 (for (4) do (5*5)) * 5
 for (4) do (4+6)
 if(2 < 1) then (10) else (1)
-for (if(2 < 1) then (10) else (1)) do (cos(0) * 10)
+for (if(2 > 1) then (10) else (1)) do (cos(0) * 10)
 5+5*5
 500-100

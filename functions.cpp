@@ -5,8 +5,27 @@
 #include <vector>
 #include <math.h>
 #include <iostream>
+#include <fstream>
 
 #include "Token.cpp"
+#include "ValuePos.cpp"
+
+// Чтение и добавление в массив (vector) интерпретируемых строк 
+void readFileLines(std::vector<std::string> &arrLines, std::string filename) {
+    std::ifstream in(filename.c_str());
+
+    if(!in.is_open())
+    {
+        std::cout << "Can not open file" << std::endl;
+        exit(-1);
+    }
+
+    std::string Temp;
+    while(getline(in, Temp))
+    {
+        arrLines.push_back(Temp);
+    }
+}
 
 // Функция возвращает приоритет операций
 int getActionPriority(char action) {
@@ -79,7 +98,7 @@ double calculateFunction(std::string nameOfFunction, double value){
 }
 
 // Выполнение слияния
-double merge(std::vector<Token> arrToken, Token &cur, int &index, bool mergeOneOnly){
+double merge(std::vector<Token> arrToken, Token &cur, int &index, bool mergeOneOnly = false){
     while(index < arrToken.size() && cur.action != ')'){
         index++;
         Token temp = arrToken[index];
@@ -100,6 +119,140 @@ bool isNumber(std::string str, char symbol, char endSymbol){
 
     return (!(symbol == '(' || symbol == end || isAction(symbol)) ||
           (str.length() < 1 && (symbol == '+' || symbol == '-' || symbol == ')')));
+}
+
+// Функция для подсчета окончательного значения для переданной строки
+ValuePos calculate(std::string curString, int curCursorPosition, char endSymbol){
+    std::vector<Token> arrTokens;
+    std::string buffer;
+
+    // Переменная для хранения результата условия для токена 'if'
+    bool condition;
+    // Переменная для хранения количества повторений цикла 'for'
+    int countRepeat = 0;
+
+    // Было ли введено ключевое слово для сопоставления введенного численного значения с этим словом
+    bool functionPresent = false;
+
+    // Цикл, пока позиция курсора меньше длины строки и текущий символ не равен 'конечному' символу
+    while(curCursorPosition < curString.length() && curString[curCursorPosition] != endSymbol){
+        char curSymbol = curString[curCursorPosition];
+        curCursorPosition++;
+        
+        // Если попалась буква, идет запись в буфер полного ключевого слова
+        if(isLetter(curSymbol)){
+            functionPresent = true;
+            buffer += curSymbol;
+            continue;
+        }
+        // Если попалась открывающаяся скобка, рекурсивно считаем значение внутри этой скобки, 'конечный' символ будет - закрывающая скобка
+        if(curSymbol == '('){
+            ValuePos tempPair = calculate(curString, curCursorPosition, ')');
+            
+            // Если ключевое слово было введено и оно соответсвует циклу 'for', то значение из скобок будет обозначать количество итераций
+            if(functionPresent && buffer.compare("for") == 0){
+                countRepeat = tempPair.value;
+                buffer.clear();
+                functionPresent = false;
+            }
+            // Если ключевое слово было введено и оно соответсвует 'do' то значение в скобках будет просуммировано countRepeat раз и создан новый токен 
+            // с этим результатом и операцей '+'
+            else if(functionPresent && buffer.compare("do") == 0){
+                double result = countRepeat * tempPair.value;
+                Token newToken = {result, '+'};
+                arrTokens.push_back(newToken);
+                buffer.clear();
+                functionPresent = false;
+            }
+            // Если ключевое слово было введено и оно соответствует 'if', то значение в скобках будет рассмотрено как логическое выражение и если оно == 0,
+            // то условие будет помечено как ложное, иначе истинное
+            else if(functionPresent && buffer.compare("if") == 0){
+                condition = (fabs(tempPair.value) < 1e-6);
+                buffer.clear();
+                functionPresent = false;
+            }
+            // Если ключевое слово было введено и оно соответсвует 'then' то значение в скобках будет выполнено при истинном значении condition и создан новый токен 
+            // с этим результатом и операцей '+', иначе результат будет приравнен к нулю
+            else if(functionPresent && buffer.compare("then") == 0){
+                if(condition){
+                    char buff[255] = {};
+                    sprintf(buff, "%lf", tempPair.value);
+                    buffer = buff;
+                } else {
+                    buffer = "0";
+                    curSymbol = '+';
+                }
+                functionPresent = false;
+                Token newToken = {atof(buffer.c_str()), curSymbol};
+                arrTokens.push_back(newToken);
+                buffer.clear();
+            }
+            // Если ключевое слово было введено и оно соответсвует 'else' то значение в скобках будет выполнено при ложном значении condition и создан новый токен 
+            // с этим результатом и операцей '+', иначе результат будет приравнен к нулю
+            else if(functionPresent && buffer.compare("else") == 0){
+                if(!condition){
+                    char buff[255] = {};
+                    sprintf(buff, "%lf", tempPair.value);
+                    buffer = buff;
+                } else {
+                    buffer = "0";
+                }
+                functionPresent = false;
+                Token newToken = {atof(buffer.c_str()), '+'};
+                arrTokens.push_back(newToken);
+                buffer.clear();
+            }
+            // Если встречено какое-либо другое ключевое слово, оно отправляется в функцию для сопоставления его с заданными
+            // функциями и для подсчета значения этой функции
+            else if(functionPresent){
+                char buff[255] = {};
+                sprintf(buff, "%lf", calculateFunction(buffer, tempPair.value));
+                buffer = buff;
+                functionPresent = false; 
+            } else {
+                char buff[255] = {};
+                sprintf(buff, "%lf", tempPair.value);
+                buffer = buff;
+            }
+            // Обновление текущей позиции курсора (после уже прочтенного выражения в скобках)
+            curCursorPosition = tempPair.position;
+            curCursorPosition++;
+
+            continue;
+        }
+        
+        // Если символ может быть частью числа, то добавляем его в буффер
+        if(isNumber(buffer, curSymbol, endSymbol))
+        {
+            if(curSymbol != ' '){
+                buffer += curSymbol;
+            }
+            continue;
+        }
+        // Если позиция курсора в конце строки или символ равен 'конечному' символу, то поле action у нового токена будет ')' 
+        if(curCursorPosition >= curString.length() || curString[curCursorPosition] == endSymbol)
+        {
+            curSymbol = ')';
+        }
+
+        Token newToken = {atof(buffer.c_str()), curSymbol};
+        arrTokens.push_back(newToken);
+        buffer.clear();
+    }
+
+    // Если в буффере еще что-то осталось, добавляем новый токен с action = ')'
+    if(buffer.length() > 0)
+    {
+        Token newToken = {atof(buffer.c_str()), ')'};
+        arrTokens.push_back(newToken);
+        buffer.clear();
+    }
+
+    // Формируется окончательный ответ к рассмотренной строке
+    Token firstToken = arrTokens[0];
+    int index = 0;
+    ValuePos ToReturn = {merge(arrTokens, firstToken, index), curCursorPosition};
+    return ToReturn;
 }
 
 #endif
